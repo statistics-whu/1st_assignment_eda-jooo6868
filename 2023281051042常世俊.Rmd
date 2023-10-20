@@ -1,0 +1,281 @@
+---
+title: "链家武汉二手房数据分析"
+author: "常世俊"
+date: "2023-10-17"
+documentclass: ctexart
+output:
+  rticles::ctex:
+    fig_caption: yes
+    number_sections: yes
+    toc: yes
+---
+
+```{r setup, include = FALSE,echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE,error = FALSE, warning = FALSE, message = FALSE,out.width = "100%", split = FALSE, fig.align = "center")
+#load library
+library(tidyverse)
+library(kableExtra)
+library(lubridate)
+library(scales)
+library(plotly)
+library(patchwork)
+library(ggrepel)
+library (psych)
+library (xts)
+library (tseries)
+library(corrplot)
+library (forecast)
+library (dplyr)
+library (ggplot2)
+library (VIM)
+library (ggmap)
+library (dygraphs)
+library (Matrix)
+library(geosphere)
+library(viridis)
+library(ggthemes)
+library(mice)
+library(showtext)
+library(moments)
+showtext_auto(enable = TRUE)#调用系统安装的字体
+```
+
+# 你的主要发现
+
+发现1.
+从建筑类型和房屋单价这两个变量进行分析，发现了"板塔结合"这类建筑类型的房屋整体单价偏高，"平房"这类建筑类型的房屋整体单价偏低的结论。
+
+发现2.
+从附近有无地铁和房屋单价这两个变量进行分析，发现了附近有地铁的房子整体单价都比附近没有地铁的单价高的结论。 
+
+发现3.
+从房屋总价和房屋面积这两个变量进行分析，发现了房屋总价大部分集中在0至500万元中间，房屋面积大部分集中在0至200平方米中间。在此区间范围内，随着房屋总价的提升，房屋面积也在不断变大。
+    
+
+# 数据介绍
+
+本报告**链家**数据获取方式如下：
+    
+报告人在2023年9月12日获取了[链家武汉二手房网站](https://wh.lianjia.com/ershoufang/)数据。
+    
+- 链家二手房网站默认显示100页，每页30套房产，因此本数据包括3000套房产信息；
+    
+- 数据包括了页面可见部分的文本信息，具体字段及说明见作业说明。
+
+ **说明：**数据仅用于教学；由于不清楚链家数据的展示规则，因此数据可能并不是武汉二手房市场的随机抽样，结论很可能有很大的偏差，甚至可能是错误的。
+    
+```{r}
+# 载入数据
+library(readr)
+lj1 <- read_csv("D:/class/homework/2023-09-12_cleaned.csv")
+
+#清洗数据
+    #去除重复项
+lj1 <- distinct(lj1)
+    #查找每列数据空缺值的数量
+#共有5304个缺失值,sum(is.na(lj1))
+
+lj_with_na <- colnames(lj1)[apply(lj1,2,function(x)any(is.na(x)))]
+print(lj_with_na)#"directions2"/"property_height"/"near_subway" / "if_2y"/"has_key"/"vr" 共有6个变量里有空缺值
+
+#判断每个样本是否完整,complete.cases(lj1)
+#共有2380个样本不完整,sum(!complete.cases(lj1))
+
+"lj_without_na<-" <- function(x, value) ifelse(is.na(x), value, x)
+lj_without_na(lj1$near_subway) <- 0
+lj_without_na(lj1$if_2y) <- 0
+lj_without_na(lj1$has_key) <- 0
+lj_without_na(lj1$vr) <- 0
+#把"near_subway" / "if_2y"/"has_key"/"vr"四个变量中的缺失值替换成0
+
+#将near_subway列所有近地铁换成1
+lj1$near_subway[lj1$near_subway == '近地铁']<- 1
+#将if_2y列所有房本满两年换成1
+lj1$if_2y[lj1$if_2y == '房本满两年']<- 1
+#将has_key列所有随时看房换成1
+lj1$has_key[lj1$has_key == '随时看房']<- 1
+#将vr列所有VR看装修换成1
+lj1$vr[lj1$vr == 'VR看装修']<- 1
+```
+通过数据清洗，得到2515行链家二手房源信息，并发现"directions2"、"property_height"、"near_subway" 、 "if_2y"、"has_key"和"vr"这6个变量里有空缺值。
+# 数据概览
+
+数据表（lj1)共包括18个变量,去除重复项后共2515行。表的前10行示例如下：
+
+```{r}
+lj1 %>% 
+  head(10) %>%
+  kable(caption = "武汉链家二手房") %>% 
+  kable_styling()
+```
+
+各变量的简短信息：
+```{r}
+glimpse(lj1)
+```
+
+各变量的简短统计：
+```{r}
+summary(lj1)
+```
+
+可以看到：
+
+- 直观结论1：
+武汉二手房屋总价最贵的1380万元，最便宜的10.6万元；武汉二手房屋单价最贵的每平方米44656元，最便宜的1771元；武汉二手房屋房间数最多的7间，最少的1间；武汉二手房屋客厅数最多的4间，最少的0间；武汉二手房屋建筑面积最大的588.66平方米，最小的22.77平方米；武汉二手房楼层总层数最高62层，最矮的2层；武汉二手房最热门的房子有262个关注者。
+
+- 直观结论2：
+武汉二手房屋总价均价为136万元；武汉二手房屋单价均价为每平方米14309元；武汉二手房屋房间数平均有3间；武汉二手房屋客厅数平均有2间；武汉二手房屋建筑面积平均95.46平方米；武汉二手房楼层总层数平均24层。
+
+
+# 探索性分析
+
+## 变量1的数值描述与图形：房屋单价价格特点
+```{r}
+skewness <- skewness(lj1$price_sqm)#偏度为1.06，代表房屋单价的累计频数分布是右偏
+#单变量描述性统计
+ #集中趋势：众数、中位数、均值
+which.max(table(lj1$price_sqm))
+mode <- names(which.max(table(lj1$price_sqm)))
+# 众数为10196
+mean <- mean(lj1$price_sqm)
+# 平均值为15110.42
+median <- median(lj1$price_sqm)
+# 中位数为14309
+ #离散趋势：四分位差、标准差
+a <- IQR(lj1$price_sqm)
+b <- quantile(lj1$price_sqm,0.75)
+c <- quantile(lj1$price_sqm,0.25)
+a == (b -c)
+a
+b
+c
+##四分位数间距为7447.5,上分位数为18212.5，下分位数为10765.
+sd(lj1$price_sqm)
+#标准差为6347
+ #分布特征：
+ggplot(lj1, aes(price_sqm))+
+  geom_histogram(bindwidth = 5000, fill = "lightpink",color = "white")+
+  theme_minimal()+
+  labs(title = "房屋单价直方图", x =" 房屋单价", y =" 频数")#绘制房屋单价直方图
+```
+
+发现：
+
+- 发现1：
+房屋单价的数值分析：从集中趋势上，房屋单价众数为10196；平均值为15110.42；中位数为14309。从离散趋势上，房屋单价四分位数间距为7447.5,上分位数为18212.5，下分位数为10765。二手房单价的标准差为6347，表示房屋单价的观测值较分散，集中趋势较差。
+
+- 发现2
+房屋单价直方图可以看出来房屋单价的累计频数分布是偏度为1.06的右偏，并且价格范围在10765到18212.5的房子数量最多。
+
+## 变量2的数值描述与图形：房屋主要朝向
+
+```{r}
+table(lj1$directions1)
+#将需要分析的字符变量转化为因子,并绘制条形图
+lj1$directions1<-factor(lj1$directions1,levels = c("北","东","东北","东南","南","西","西北","西南"))
+ggplot(lj1,aes(x=directions1))+geom_bar(fill="lightblue",colour="white")+labs(x="朝向",y="不同朝向房屋数量",title="房屋朝向直方图")
+
+
+```
+
+
+发现：
+
+武汉的链家二手房的朝向分为"北","东","东北","东南","南","西","西北","西南"八种。其中"南"朝向的房子数量最多。"东北"和"西北"朝向的房子数量最小。
+
+
+
+## 变量3的数值描述与图形：房屋的建筑形式
+```{r}
+table(lj1$property_style)
+#将需要分析的字符变量转化为因子,并绘制条形图
+lj1$property_style<-factor(lj1$property_style,levels = c("板楼","板塔结合","平房","塔楼","暂无数据"))
+ggplot(lj1,aes(x=property_style))+geom_bar(fill="lightyellow",colour="white")+labs(x="建筑形式",y="不同建筑形式房屋数量",title="房屋建筑形式直方图")
+
+```
+
+发现：
+
+武汉的链家二手房的建筑形式分为"板楼","板塔结合","平房","塔楼"四种。其中"板楼"形式的房子数量最多。"平房"形式的房子数量最小。
+
+
+## 探索问题1：房屋单价和建筑类型的关系
+```{r}
+bl <- filter(lj1,property_style=="板楼")
+tb <- filter(lj1,property_style=="板塔结合")
+pf <- filter(lj1,property_style=="平房")
+tl <- filter(lj1,property_style=="塔楼")
+summary(bl$price_sqm)
+summary(tb$price_sqm)
+summary(pf$price_sqm)
+summary(tl$price_sqm)
+ggplot(lj1, aes(x = property_style, y = price_sqm, color = property_style))+
+  geom_boxplot()+ 
+  labs(title = "建筑类型与价格的关系", x =" 建筑类型", y =" 价格")+
+  geom_jitter(aes(fill=price_sqm),width =0.2,shape = 21,size=1)
+```
+
+发现：
+
+首先把"板楼","板塔结合","平房","塔楼"四种不同建筑类型的房子划分成四个表格，然后分别获取描述性统计量得到表一。从表一可以看出不同建筑类型的房屋单价均值和中位数大小顺序是一样的，顺序如下：板塔结合>塔楼>板楼>平房。可以得到"板塔结合"这类建筑类型的房子整体价格最高。"平房"这类建筑类型的房子不仅数量较少且整体价格偏低。
+
+表二按照建筑类型和房屋单价绘制箱型图和散点图。可以看出四种类型的房屋数量排列如下：板楼>板塔结合>塔楼>平房。通过箱型图矩形框的长度，可以看出来"板楼","板塔结合"和“塔楼"的长度差不多，代表三个建筑类型的离散程度接近。
+
+## 探索问题2：附近有无地铁对价格的影响
+```{r}
+lj2 <- filter(lj1,near_subway %in% c("0","1"))#去除无关值
+No_subway <- filter(lj2,near_subway=="0")
+Has_subway <- filter(lj1,near_subway=="1")
+summary(No_subway$price_sqm)
+summary(Has_subway$price_sqm)
+ggplot(lj2, aes(x = near_subway, y = price_sqm, color = near_subway))+
+  geom_boxplot()+ 
+  labs(title = "附近有无地铁对价格的影响", x =" 有无地铁", y =" 价格")+
+  geom_jitter(aes(fill=price_sqm),width =0.2,shape = 21,size=1)
+
+```
+
+发现：
+
+首先把数据库中除了0和1之外的无关数据去除，得到了关于有无地铁和价格的箱型图。得到了附近有地铁的房子整体单价都比附近没有地铁的单价高的结论。
+
+## 探索问题3：房屋总价和房屋面积的关系
+```{r}
+er <- function(a){
+  a1 <- a[1]
+  a2 <- a[2]
+  sum((a[1]+a2*lj1$price_ttl-lj1$building_area)^2)
+} 
+#牛顿-拉夫逊搜索，优化
+results <- optim(c(0,0),er)
+results$par#得到a1=67.4238502,a2=0.2147854,房屋总价和房屋面积的一元二次方程式为y=67.4238502+0.2147854x
+ggplot(lj1,aes(x = price_ttl, y = building_area))+
+  geom_abline(aes(intercept=67.4238502,slope=0.2147854),data=lj1,color="pink")+
+  geom_point(color="lightblue")+
+  geom_smooth()#绘制散点图和平滑曲线图
+```
+
+发现：
+
+- 发现1：通过牛顿-拉夫逊搜索优化得到房屋总价和房屋面积的一元二次方程式为y=67.4238502+0.2147854x。
+
+- 发现2：房屋总价大部分集中在0-500万元中间，房屋面积大部分集中在0-200平方米中间。在此区间范围内，一元线性回归模型和平滑曲线很接近,随着房屋总价的提升，房屋面积也在不断变大。
+
+---
+
+# 发现总结
+通过数据的清洗，得到2515行武汉链家二手房源数据，首先对18个变量进行描述性统计量分析；其次选取单价、朝向和建筑形式进行单变量分析；最后探索房屋单价和建筑类型的关系、附近有无地铁对价格的影响和房屋总价与房屋面积的关系。得到了以下发现和总结：
+
+- 1、房屋单价的众数为10196元，平均值为15110.42元，中位数为14309元，且且价格范围在10765到18212.5的房子数量最多。
+
+- 2、武汉的链家二手房的朝向分为"北","东","东北","东南","南","西","西北","西南"八种。其中"南"朝向的房子数量最多。"东北"和"西北"朝向的房子数量最小。
+
+- 3、武汉的链家二手房的建筑形式分为"板楼","板塔结合","平房","塔楼"四种。其中"板楼"形式的房子数量最多。"平房"形式的房子数量最小。
+
+- 4、板塔结合这类建筑类型的房子整体单价偏高。平房这类建筑类型的房整体单价偏低。
+
+- 5、附近有地铁的房子整体单价都比附近没有地铁的单价高。
+
+- 6、房屋总价大部分集中在0-500万元中间，房屋面积大部分集中在0-200平方米中间。在此区间范围内，随着房屋总价的提升，房屋面积也在不断变大。
+
